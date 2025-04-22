@@ -6,7 +6,7 @@ block_bp = Blueprint('block', __name__, url_prefix='/blocks')
 
 # Define allowed fields that will be returned in the response
 # This can be modified later as needed
-ALLOWED_FIELDS = ['tenKhoi', 'loaiKhoi', 'blobUrl', 'canNang', 'id']
+ALLOWED_FIELDS = ['tenKhoi', 'loaiKhoi', 'blobUrl', 'canNang', 'id', 'donViCanNang', 'kichThuoc']
 
 @block_bp.route('/', methods=['GET'])
 def get_all_blocks():
