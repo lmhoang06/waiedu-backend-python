@@ -1,8 +1,15 @@
 from flask import Blueprint, jsonify, request
 import os
 import bcrypt
+import re
+import uuid
 from app.services import postgresql
 from app.services.jwt_service import generate_jwt
+from app.models.user import User
+from app.models.subject import Subject
+from app.models.user_subject import UserSubject
+from app.models.enums import UserGender, UserRole
+from app.services.postgresql import db
 
 # Create a blueprint for main routes
 main_bp = Blueprint('main', __name__, url_prefix='/main')
@@ -56,22 +63,18 @@ def login():
         }), 400
     
     try:
-        # Query database for user with matching email
-        query = "SELECT * FROM users WHERE email = :email"
-        users = postgresql.execute_query(query, {'email': email})
+        # Query database for user with matching email using SQLAlchemy model
+        user = User.query.filter_by(email=email).first()
         
         # Check if user exists
-        if not users or len(users) == 0:
+        if not user:
             return jsonify({
                 'success': 0,
                 'message': 'Invalid email or password'
             }), 401
         
-        # Get user record
-        user = users[0]
-        
         # Check password match using bcrypt
-        stored_password = user.get('password').encode('utf-8')
+        stored_password = user.password.encode('utf-8')
         provided_password = password.encode('utf-8')
         
         if not bcrypt.checkpw(provided_password, stored_password):
@@ -81,7 +84,21 @@ def login():
             }), 401
         
         # Authentication successful - prepare user data (excluding password)
-        user_data = {key: value for key, value in user.items() if key != 'password'}
+        # Convert SQLAlchemy model to dictionary
+        user_data = {column.name: getattr(user, column.name) 
+                    for column in User.__table__.columns 
+                    if column.name != 'password'}
+        
+        # Handle date and enum types for JSON serialization
+        for key, value in user_data.items():
+            if key == 'birth_date' and value is not None:
+                user_data[key] = value.isoformat()
+            elif key == 'gender' and value is not None:
+                user_data[key] = value.value
+            elif key == 'role':
+                user_data[key] = value.value
+            elif key in ['created_at', 'updated_at'] and value is not None:
+                user_data[key] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
         
         # Convert keys from snake_case to camelCase
         user_data_camel_case = {}
@@ -89,31 +106,23 @@ def login():
             camel_key = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(key.split('_')))
             user_data_camel_case[camel_key] = value
         
-        # Get user subjects
-        query = """
-        SELECT s.id, s.name 
-        FROM subjects s
-        JOIN user_subjects us ON s.id = us.subject_id
-        WHERE us.user_id = :user_id
-        """
-        subjects = postgresql.execute_query(query, {'user_id': user['id']})
-        
-        # Convert subject keys from snake_case to camelCase
-        subjects_camel_case = []
-        for subject in subjects:
-            subject_camel_case = {}
-            for key, value in subject.items():
-                camel_key = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(key.split('_')))
-                subject_camel_case[camel_key] = value
-            subjects_camel_case.append(subject_camel_case)
+        # Get user subjects using the relationship
+        subjects_data = []
+        if user.user_subjects:
+            for user_subject in user.user_subjects:
+                subject = user_subject.subject
+                subjects_data.append({
+                    'id': subject.id,
+                    'name': subject.name
+                })
         
         # Add subjects to user data if any found
-        if subjects_camel_case:
-            user_data_camel_case['subjects'] = subjects_camel_case
+        if subjects_data:
+            user_data_camel_case['subjects'] = subjects_data
         
         # Generate JWT token
         jwt_secret = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
-        token = generate_jwt({'userId': user['id'], 'email': user['email']}, jwt_secret)
+        token = generate_jwt({'userId': user.id, 'email': user.email}, jwt_secret)
         
         # Return success response
         return jsonify({
@@ -203,11 +212,10 @@ def register():
     interested_subjects = registration_data.get('interestedSubjects', [])
     
     try:
-        # Check if email already exists
-        query = "SELECT id FROM users WHERE email = :email"
-        existing_user = postgresql.execute_query(query, {'email': email})
+        # Check if email already exists using SQLAlchemy model
+        existing_user = User.query.filter_by(email=email).first()
         
-        if existing_user and len(existing_user) > 0:
+        if existing_user:
             return jsonify({
                 'success': 0,
                 'message': 'Email already registered'
@@ -217,107 +225,124 @@ def register():
         salt = bcrypt.gensalt(rounds=10)  # Salt rounds = 10
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
         
-        # Create user data object from registration_data, replacing password with hashed version
-        user_data = {
-            'name': name,
-            'email': email,
-            'password': hashed_password.decode('utf-8'),
-            'role': role,
-            'is_verified': False
-        }
+        # Convert the role string to UserRole enum
+        user_role = UserRole[role]
+        
+        # Convert the gender string to UserGender enum if provided
+        user_gender = None
+        if gender:
+            try:
+                user_gender = UserGender[gender]
+            except KeyError:
+                return jsonify({
+                    'success': 0,
+                    'message': 'Invalid gender value'
+                }), 400
+        
+        # Create new User instance
+        new_user = User(
+            name=name,
+            email=email,
+            password=hashed_password.decode('utf-8'),
+            role=user_role,
+            is_verified=False,
+            verification_token=str(uuid.uuid4())
+        )
         
         # Add optional fields if they exist
         if phone:
-            user_data['phone'] = phone
+            new_user.phone = phone
         if birth_date:
-            user_data['birth_date'] = birth_date
-        if gender:
-            user_data['gender'] = gender
+            new_user.birth_date = birth_date
+        if user_gender:
+            new_user.gender = user_gender
         if grade:
-            user_data['grade'] = grade
+            new_user.grade = grade
         if school:
-            user_data['school'] = school
+            new_user.school = school
         if teaching_subject:
-            user_data['teaching_subject'] = teaching_subject
+            new_user.teaching_subject = teaching_subject
         if child_grade:
-            user_data['child_grade'] = child_grade
+            new_user.child_grade = child_grade
             
-        # Generate verification token
-        import uuid
-        verification_token = str(uuid.uuid4())
-        user_data['verification_token'] = verification_token
+        # Add the user to the session and commit to get the ID
+        db.session.add(new_user)
+        db.session.flush()  # This assigns an ID without committing the transaction
         
-        try:
-            # Insert the new user
-            columns = ', '.join(user_data.keys())
-            placeholders = ', '.join([f':{key}' for key in user_data.keys()])
-            
-            insert_query = f"""
-            INSERT INTO users ({columns}) 
-            VALUES ({placeholders})
-            RETURNING id, name, email, role, is_verified, created_at, updated_at
-            """
-            
-            result = postgresql.execute_query(insert_query, user_data)
-            
-            if not result or len(result) == 0:
-                return jsonify({
-                    'success': 0,
-                    'message': 'Failed to create user'
-                }), 500
-                
-            user_id = result[0]['id']
-            
-            # Insert interested subjects if any
-            if interested_subjects and isinstance(interested_subjects, list) and len(interested_subjects) > 0:
-                # Process each subject separately with postgresql.execute_query
-                for subject_id in interested_subjects:
-                    try:
-                        # Use simple INSERT query without expecting results back
-                        subject_query = """
-                        INSERT INTO user_subjects (user_id, subject_id) 
-                        VALUES (:user_id, :subject_id)
-                        """
-                        
-                        # Using execute_non_query or a method that doesn't expect results
-                        # If postgresql has no specific method for non-query operations, add RETURNING clause
-                        postgresql.execute_query(subject_query + " RETURNING 1", {
-                            'user_id': user_id,
-                            'subject_id': subject_id
-                        })
-                    except Exception as subject_error:
-                        # Log error but continue with other subjects
-                        print(f"Error adding subject {subject_id}: {str(subject_error)}")
-            
-            # Convert keys from snake_case to camelCase
-            user_data_camel_case = {}
-            for key, value in result[0].items():
-                camel_key = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(key.split('_')))
-                user_data_camel_case[camel_key] = value
-            
-            # Generate JWT token
-            jwt_secret = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
-            token = generate_jwt({
-                'userId': user_id, 
-                'email': result[0]['email'],
-                'role': result[0]['role']
-            }, jwt_secret)
-            
-            # Here you would send verification email to the user
-            # send_verification_email(email, verification_token)
-            
-            # Return success response
-            return jsonify({
-                'success': 1,
-                'message': 'Registration successful',
-                'token': token,
-                'user': user_data_camel_case
-            }), 201
-                
-        except Exception as e:
-            raise e
+        # Add interested subjects if any
+        if interested_subjects and isinstance(interested_subjects, list) and len(interested_subjects) > 0:
+            for subject_id in interested_subjects:
+                # Check if subject exists
+                subject = Subject.query.get(subject_id)
+                if subject:
+                    # Create UserSubject association
+                    user_subject = UserSubject(
+                        user_id=new_user.id,
+                        subject_id=subject_id
+                    )
+                    db.session.add(user_subject)
         
+        # Commit the transaction to save all changes
+        db.session.commit()
+        
+        # Prepare user data for response (excluding password)
+        user_data = {column.name: getattr(new_user, column.name) 
+                    for column in User.__table__.columns 
+                    if column.name != 'password'}
+        
+        # Handle date and enum types for JSON serialization
+        for key, value in user_data.items():
+            if key == 'birth_date' and value is not None:
+                user_data[key] = value.isoformat()
+            elif key == 'gender' and value is not None:
+                user_data[key] = value.value
+            elif key == 'role':
+                user_data[key] = value.value
+            elif key in ['created_at', 'updated_at'] and value is not None:
+                user_data[key] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
+        
+        # Convert keys from snake_case to camelCase
+        user_data_camel_case = {}
+        for key, value in user_data.items():
+            camel_key = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(key.split('_')))
+            user_data_camel_case[camel_key] = value
+        
+        # Get user subjects if any were added
+        subjects_data = []
+        if new_user.user_subjects:
+            for user_subject in new_user.user_subjects:
+                subject = user_subject.subject
+                subjects_data.append({
+                    'id': subject.id,
+                    'name': subject.name
+                })
+        
+        # Add subjects to user data if any found
+        if subjects_data:
+            user_data_camel_case['subjects'] = subjects_data
+        
+        # Generate JWT token
+        jwt_secret = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
+        token = generate_jwt({
+            'userId': new_user.id, 
+            'email': new_user.email,
+            'role': new_user.role.value
+        }, jwt_secret)
+        
+        # Here you would send verification email to the user
+        # send_verification_email(email, new_user.verification_token)
+        
+        # Return success response
+        return jsonify({
+            'success': 1,
+            'message': 'Registration successful',
+            'token': token,
+            'user': user_data_camel_case
+        }), 201
+                
     except Exception as e:
+        # Rollback the transaction in case of error
+        db.session.rollback()
         return jsonify({
             'success': 0,
             'message': f'Error during registration: {str(e)}'
