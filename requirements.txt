@@ -3,3 +3,5 @@ flask_cors
 gunicorn
 python-dotenv
 firebase-admin
+psycopg2-binary
+Flask-SQLAlchemy
