@@ -506,6 +506,58 @@ def get_my_courses(user):
     except Exception as e:
         return utils.error_response(f'Error retrieving your courses: {str(e)}', 500)
 
+@main_courses_bp.route('/<int:course_id>/analytics', methods=['GET'])
+@ensure_db_connection
+@role_required('teacher', 'admin')
+def get_course_analytics(user, course_id):
+    """
+    Get analytics data for a specific course.
+    Accessible by:
+    - Admin: Can access analytics for any course
+    - Teacher: Can only access analytics for courses they created
+    
+    URL Parameters:
+        course_id: The ID of the course
+        
+    Returns:
+        JSON response with course analytics data
+    """
+    try:
+        # Query the course by ID
+        course = Course.query.get(course_id)
+        
+        # If course does not exist
+        if not course:
+            return utils.error_response('Course not found', 404)
+        
+        # Check permissions:
+        # - Admins can access analytics for any course
+        # - Teachers can only access analytics for their own courses
+        if user.role == UserRole.teacher and course.teacher_user_id != user.id:
+            return utils.error_response('Permission denied. You can only view analytics for your own courses.', 403)
+        
+        # Get enrollment count
+        enrollment_count = StudentEnrollment.query.filter_by(course_id=course_id).count()
+        
+        # Calculate total revenue (price at enrollment * number of enrollments)
+        # We use the price recorded at enrollment time for accurate historical data
+        enrollments = StudentEnrollment.query.filter_by(course_id=course_id).all()
+        total_revenue = sum(enrollment.price_at_enrollment for enrollment in enrollments)
+        
+        # Prepare analytics data
+        analytics_data = {
+            'course_id': course_id,
+            'course_title': course.title,
+            'enrollment_count': enrollment_count,
+            'total_revenue': total_revenue,
+            'currency_code': course.currency_code
+        }
+        
+        return utils.success_response('Course analytics retrieved successfully', {'analytics': analytics_data})
+        
+    except Exception as e:
+        return utils.error_response(f'Error retrieving course analytics: {str(e)}', 500)
+
 @main_courses_bp.route('/<int:course_id>/enroll', methods=['POST'])
 @ensure_db_connection
 @role_required('student')
