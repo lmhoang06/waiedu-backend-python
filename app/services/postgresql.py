@@ -4,8 +4,8 @@ PostgreSQL Service Module
 This module provides database connection and query functions using SQLAlchemy.
 It serves as a wrapper around SQLAlchemy to simplify database interactions.
 """
-import os
 from flask import current_app
+from sqlalchemy.orm import sessionmaker
 import logging
 import time
 from sqlalchemy import text
@@ -75,7 +75,8 @@ def check_db_connection(max_retries=3, retry_delay=1.0):
                 
                 # Get a new session
                 current_app.postgresql_session.close()
-                current_app.postgresql_session = db.create_scoped_session(options={"bind": current_app.postgresql_engine})
+                Session = sessionmaker(bind=current_app.postgresql_engine)
+                current_app.postgresql_session = Session()
             else:
                 logging.error("Failed to reconnect to database after maximum retries")
                 raise
