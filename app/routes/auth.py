@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, request
 from app.services import firestore
+from app import utils
 from werkzeug.security import check_password_hash, generate_password_hash
 import time
 
@@ -38,13 +39,9 @@ def login():
         If failed: JSON with success=0 and error message
     """
     # Get JSON data from request
-    login_data = request.get_json()
-    
-    if not login_data:
-        return jsonify({
-            'success': 0,
-            'message': 'No data provided'
-        }), 400
+    login_data, error = utils.get_request_data()
+    if error:
+        return error
     
     # Extract username and password
     username = login_data.get('username')
@@ -52,10 +49,7 @@ def login():
     
     # Validate input
     if not username or not password:
-        return jsonify({
-            'success': 0,
-            'message': 'Username and password are required'
-        }), 400
+        return utils.error_response('Username and password are required', 400)
     
     # Query Firestore for user with matching username
     users = firestore.query_documents(
@@ -66,10 +60,7 @@ def login():
     
     # Check if user exists
     if not users or len(users) == 0:
-        return jsonify({
-            'success': 0,
-            'message': 'Invalid username or password'
-        }), 401
+        return utils.error_response('Invalid username or password', 401)
     
     # Get user record
     user = users[0]
@@ -78,10 +69,7 @@ def login():
     stored_password_hash = user.get('password')
     
     if not stored_password_hash or not check_password_hash(stored_password_hash, password):
-        return jsonify({
-            'success': 0,
-            'message': 'Invalid username or password'
-        }), 401
+        return utils.error_response('Invalid username or password', 401)
     
     # Authentication successful - create session
     current_time = int(time.time() * 1000)
@@ -93,11 +81,7 @@ def login():
     }
     
     # Return success response with session information
-    return jsonify({
-        'success': 1,
-        'message': 'Authentication successful',
-        'session': session_data
-    })
+    return utils.success_response('Authentication successful', {'session': session_data})
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -115,13 +99,9 @@ def register():
         If failed: JSON with success=0 and error message
     """
     # Get JSON data from request
-    registration_data = request.get_json()
-    
-    if not registration_data:
-        return jsonify({
-            'success': 0,
-            'message': 'No data provided'
-        }), 400
+    registration_data, error = utils.get_request_data()
+    if error:
+        return error
     
     # Extract username and password
     username = registration_data.get('username')
@@ -129,10 +109,12 @@ def register():
     
     # Validate input
     if not username or not password:
-        return jsonify({
-            'success': 0,
-            'message': 'Username and password are required'
-        }), 400
+        return utils.error_response('Username and password are required', 400)
+    
+    # Validate password length
+    password_error = utils.validate_password(password)
+    if password_error:
+        return password_error
     
     # Check if username already exists
     existing_users = firestore.query_documents(
@@ -142,10 +124,7 @@ def register():
     )
     
     if existing_users and len(existing_users) > 0:
-        return jsonify({
-            'success': 0,
-            'message': 'Username already exists'
-        }), 409  # Conflict status code
+        return utils.error_response('Username already exists', 409)  # Conflict status code
     
     # Hash the password
     password_hash = generate_password_hash(password)
@@ -164,10 +143,7 @@ def register():
     )
     
     if not result:
-        return jsonify({
-            'success': 0,
-            'message': 'Failed to register user'
-        }), 500
+        return utils.error_response('Failed to register user', 500)
     
     # Return success response without password
     user_response = {
@@ -176,8 +152,4 @@ def register():
         'created_at': user_data['created_at']
     }
     
-    return jsonify({
-        'success': 1,
-        'message': 'Registration successful',
-        'user': user_response
-    }), 201  # Created status code
+    return utils.success_response('Registration successful', {'user': user_response}, 201)

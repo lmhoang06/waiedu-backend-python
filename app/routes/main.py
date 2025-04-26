@@ -3,13 +3,14 @@ import os
 import bcrypt
 import re
 import uuid
-from app.services import postgresql
+from datetime import datetime, timedelta
 from app.services.jwt_service import generate_jwt
 from app.models.user import User
 from app.models.subject import Subject
 from app.models.user_subject import UserSubject
 from app.models.enums import UserGender, UserRole
 from app.services.postgresql import db
+from app import utils
 
 # Create a blueprint for main routes
 main_bp = Blueprint('main', __name__, url_prefix='/main')
@@ -43,13 +44,9 @@ def login():
         If failed: JSON with success=0 and error message
     """
     # Get JSON data from request
-    login_data = request.get_json()
-    
-    if not login_data:
-        return jsonify({
-            'success': 0,
-            'message': 'No data provided'
-        }), 400
+    login_data, error = utils.get_request_data()
+    if error:
+        return error
     
     # Extract email and password
     email = login_data.get('email')
@@ -57,10 +54,7 @@ def login():
     
     # Validate input
     if not email or not password:
-        return jsonify({
-            'success': 0,
-            'message': 'Email and password are required'
-        }), 400
+        return utils.error_response('Email and password are required', 400)
     
     try:
         # Query database for user with matching email using SQLAlchemy model
@@ -68,75 +62,27 @@ def login():
         
         # Check if user exists
         if not user:
-            return jsonify({
-                'success': 0,
-                'message': 'Invalid email or password'
-            }), 401
+            return utils.error_response('Invalid email or password', 401)
         
         # Check password match using bcrypt
-        stored_password = user.password.encode('utf-8')
-        provided_password = password.encode('utf-8')
+        if not utils.verify_password(password, user.password):
+            return utils.error_response('Invalid email or password', 401)
         
-        if not bcrypt.checkpw(provided_password, stored_password):
-            return jsonify({
-                'success': 0,
-                'message': 'Invalid email or password'
-            }), 401
-        
-        # Authentication successful - prepare user data (excluding password)
-        # Convert SQLAlchemy model to dictionary
-        user_data = {column.name: getattr(user, column.name) 
-                    for column in User.__table__.columns 
-                    if column.name != 'password'}
-        
-        # Handle date and enum types for JSON serialization
-        for key, value in user_data.items():
-            if key == 'birth_date' and value is not None:
-                user_data[key] = value.isoformat()
-            elif key == 'gender' and value is not None:
-                user_data[key] = value.value
-            elif key == 'role':
-                user_data[key] = value.value
-            elif key in ['created_at', 'updated_at'] and value is not None:
-                user_data[key] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
-        
-        # Convert keys from snake_case to camelCase
-        user_data_camel_case = {}
-        for key, value in user_data.items():
-            camel_key = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(key.split('_')))
-            user_data_camel_case[camel_key] = value
-        
-        # Get user subjects using the relationship
-        subjects_data = []
-        if user.user_subjects:
-            for user_subject in user.user_subjects:
-                subject = user_subject.subject
-                subjects_data.append({
-                    'id': subject.id,
-                    'name': subject.name
-                })
-        
-        # Add subjects to user data if any found
-        if subjects_data:
-            user_data_camel_case['subjects'] = subjects_data
+        # Serialize user data
+        user_data = utils.serialize_user(user)
         
         # Generate JWT token
         jwt_secret = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
         token = generate_jwt({'userId': user.id, 'email': user.email}, jwt_secret)
         
         # Return success response
-        return jsonify({
-            'success': 1,
-            'message': 'Authentication successful',
-            'token': token,
-            'user': user_data_camel_case
-        })
+        return utils.success_response(
+            'Authentication successful',
+            {'token': token, 'user': user_data}
+        )
         
     except Exception as e:
-        return jsonify({
-            'success': 0,
-            'message': f'Error during authentication: {str(e)}'
-        }), 500
+        return utils.error_response(f'Error during authentication: {str(e)}', 500)
 
 @main_bp.route('/auth/register', methods=['POST'])
 def register():
@@ -157,13 +103,9 @@ def register():
         If failed: JSON with success=0 and error message
     """
     # Get JSON data from request
-    registration_data = request.get_json()
-    
-    if not registration_data:
-        return jsonify({
-            'success': 0,
-            'message': 'No data provided'
-        }), 400
+    registration_data, error = utils.get_request_data()
+    if error:
+        return error
     
     # Extract required fields
     email = registration_data.get('email')
@@ -172,34 +114,22 @@ def register():
     role = registration_data.get('role', 'student')  # Default to student if not provided
     
     # Validate input
-    if not email or not password or not name:
-        return jsonify({
-            'success': 0,
-            'message': 'Email, password, and name are required'
-        }), 400
+    if not name:
+        return utils.error_response('Name is required', 400)
+        
+    # Validate email
+    email_error = utils.validate_email(email)
+    if email_error:
+        return email_error
     
-    # Validate email format using a simple regex
-    import re
-    email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(email_regex, email):
-        return jsonify({
-            'success': 0,
-            'message': 'Invalid email format'
-        }), 400
-    
-    # Validate password length
-    if len(password) < 8:
-        return jsonify({
-            'success': 0,
-            'message': 'Password must be at least 8 characters long'
-        }), 400
+    # Validate password
+    password_error = utils.validate_password(password)
+    if password_error:
+        return password_error
     
     # Validate role enum
     if role not in ['student', 'teacher', 'parent']:
-        return jsonify({
-            'success': 0,
-            'message': 'Role must be one of: student, teacher, parent'
-        }), 400
+        return utils.error_response('Role must be one of: student, teacher, parent', 400)
     
     # Extract optional fields
     phone = registration_data.get('phone')
@@ -216,14 +146,7 @@ def register():
         existing_user = User.query.filter_by(email=email).first()
         
         if existing_user:
-            return jsonify({
-                'success': 0,
-                'message': 'Email already registered'
-            }), 409
-        
-        # Hash the password with bcrypt
-        salt = bcrypt.gensalt(rounds=10)  # Salt rounds = 10
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), salt)
+            return utils.error_response('Email already registered', 409)
         
         # Convert the role string to UserRole enum
         user_role = UserRole[role]
@@ -234,16 +157,13 @@ def register():
             try:
                 user_gender = UserGender[gender]
             except KeyError:
-                return jsonify({
-                    'success': 0,
-                    'message': 'Invalid gender value'
-                }), 400
+                return utils.error_response('Invalid gender value', 400)
         
         # Create new User instance
         new_user = User(
             name=name,
             email=email,
-            password=hashed_password.decode('utf-8'),
+            password=utils.hash_password(password),
             role=user_role,
             is_verified=False,
             verification_token=str(uuid.uuid4())
@@ -285,41 +205,8 @@ def register():
         # Commit the transaction to save all changes
         db.session.commit()
         
-        # Prepare user data for response (excluding password)
-        user_data = {column.name: getattr(new_user, column.name) 
-                    for column in User.__table__.columns 
-                    if column.name != 'password'}
-        
-        # Handle date and enum types for JSON serialization
-        for key, value in user_data.items():
-            if key == 'birth_date' and value is not None:
-                user_data[key] = value.isoformat()
-            elif key == 'gender' and value is not None:
-                user_data[key] = value.value
-            elif key == 'role':
-                user_data[key] = value.value
-            elif key in ['created_at', 'updated_at'] and value is not None:
-                user_data[key] = value.isoformat() if hasattr(value, 'isoformat') else str(value)
-        
-        # Convert keys from snake_case to camelCase
-        user_data_camel_case = {}
-        for key, value in user_data.items():
-            camel_key = ''.join(word.capitalize() if i > 0 else word for i, word in enumerate(key.split('_')))
-            user_data_camel_case[camel_key] = value
-        
-        # Get user subjects if any were added
-        subjects_data = []
-        if new_user.user_subjects:
-            for user_subject in new_user.user_subjects:
-                subject = user_subject.subject
-                subjects_data.append({
-                    'id': subject.id,
-                    'name': subject.name
-                })
-        
-        # Add subjects to user data if any found
-        if subjects_data:
-            user_data_camel_case['subjects'] = subjects_data
+        # Serialize user data
+        user_data = utils.serialize_user(new_user)
         
         # Generate JWT token
         jwt_secret = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
@@ -333,18 +220,152 @@ def register():
         # send_verification_email(email, new_user.verification_token)
         
         # Return success response
-        return jsonify({
-            'success': 1,
-            'message': 'Registration successful',
-            'token': token,
-            'user': user_data_camel_case
-        }), 201
+        return utils.success_response(
+            'Registration successful',
+            {'token': token, 'user': user_data}, 
+            201
+        )
                 
     except Exception as e:
         # Rollback the transaction in case of error
         db.session.rollback()
-        return jsonify({
-            'success': 0,
-            'message': f'Error during registration: {str(e)}'
-        }), 500
+        return utils.error_response(f'Error during registration: {str(e)}', 500)
+
+@main_bp.route('/auth/forgot-password', methods=['POST'])
+def forgot_password():
+    """
+    Process forgot password request and generate reset token
+    
+    Expected request body:
+    {
+        "email": "user@example.com"
+    }
+    
+    Returns:
+        JSON response with status and message
+    """
+    # Get JSON data from request
+    data, error = utils.get_request_data()
+    if error:
+        return error
+    
+    # Extract email
+    email = data.get('email')
+    
+    # Validate email
+    email_error = utils.validate_email(email)
+    if email_error:
+        return email_error
+    
+    try:
+        # Check if user exists with the given email
+        user = User.query.filter_by(email=email).first()
+        
+        # For security reasons, we return the same message whether the email exists or not
+        # to prevent user enumeration attacks
+        
+        # If user exists, generate token and update user record
+        if user:
+            # Generate a reset token
+            reset_token = str(uuid.uuid4())
+            
+            # Set expiry time (24 hours from now)
+            reset_token_expiry = datetime.now() + timedelta(hours=24)
+            
+            # Update the user record
+            user.reset_token = reset_token
+            user.reset_token_expiry = reset_token_expiry
+            db.session.commit()
+            
+            # In a real application, send email with reset link
+            # send_reset_email(email, reset_token)
+            
+            # Debug info for development - remove in production
+            debug_info = {'debug_token': reset_token} if os.environ.get('FLASK_ENV') == 'development' else {}
+        else:
+            debug_info = {}
+        
+        # Return success response
+        response = {
+            'success': 1,
+            'message': 'If an account with this email exists, a reset link has been sent.'
+        }
+        
+        # Add debug info if available
+        response.update(debug_info)
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        # Log the error (ideally to a proper logging system)
+        print(f"Error processing forgot password request: {str(e)}")
+        
+        # Rollback transaction in case of error
+        db.session.rollback()
+        
+        return utils.error_response('Request failed. Please try again later.', 500)
+
+@main_bp.route('/auth/reset-password', methods=['POST'])
+def reset_password():
+    """
+    Reset user password using token
+    
+    Expected request body:
+    {
+        "token": "reset_token_uuid",
+        "password": "newpassword",
+        "confirmPassword": "newpassword"
+    }
+    
+    Returns:
+        JSON response with status and message
+    """
+    # Get JSON data from request
+    data, error = utils.get_request_data()
+    if error:
+        return error
+    
+    # Extract required fields
+    token = data.get('token')
+    password = data.get('password')
+    confirm_password = data.get('confirmPassword')
+    
+    # Validate required fields
+    if not token:
+        return utils.error_response('Token is required')
+    
+    # Validate password
+    password_error = utils.validate_password(password, confirm_password)
+    if password_error:
+        return password_error
+    
+    try:
+        # Find user with valid reset token
+        user = User.query.filter(
+            User.reset_token == token,
+            User.reset_token_expiry > datetime.now()
+        ).first()
+        
+        if not user:
+            return utils.error_response('Invalid or expired token', 400)
+        
+        # Update the user's password and clear reset token fields
+        user.password = utils.hash_password(password)
+        user.reset_token = None
+        user.reset_token_expiry = None
+        
+        # Commit the changes
+        db.session.commit()
+        
+        # Return success response
+        return utils.success_response('Password has been reset successfully')
+        
+    except Exception as e:
+        # Log the error
+        print(f"Error resetting password: {str(e)}")
+        
+        # Rollback the transaction in case of error
+        db.session.rollback()
+        
+        return utils.error_response('Password reset failed. Please try again later.', 500)
 
