@@ -49,5 +49,14 @@ class Course(db.Model):
         lazy="dynamic"
     )
 
+    # Relationship to Class (One-to-Many)
+    classes = relationship(
+        "Class",
+        back_populates="course", # Links to the 'course' attribute in the Class model
+        cascade="all, delete-orphan", # Ensures classes are deleted if the course is deleted (matches ON DELETE CASCADE)
+        lazy="dynamic", # Good practice for potentially large collections
+        order_by="Class.scheduled_start_time" # Optional: Default ordering when accessing course.classes
+    )
+
     def __repr__(self):
         return f'<Course id={self.id} title={self.title}>'

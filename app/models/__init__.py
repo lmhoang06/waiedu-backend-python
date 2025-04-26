@@ -5,6 +5,7 @@ from .user_subject import UserSubject
 from .parent_child_link import ParentChildLink
 from .student_enrollment import StudentEnrollment
 from .course import Course
+from .classes import Class
 
 __all__ = [
     'UserGender',
@@ -15,4 +16,5 @@ __all__ = [
     'ParentChildLink',
     'StudentEnrollment',
     'Course',
+    'Class'
 ]

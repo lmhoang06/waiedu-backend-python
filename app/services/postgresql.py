@@ -75,7 +75,7 @@ def check_db_connection(max_retries=3, retry_delay=1.0):
                 
                 # Get a new session
                 current_app.postgresql_session.close()
-                current_app.postgresql_session = db.create_scoped_session()
+                current_app.postgresql_session = db.create_scoped_session(options={"bind": current_app.postgresql_engine})
             else:
                 logging.error("Failed to reconnect to database after maximum retries")
                 raise
