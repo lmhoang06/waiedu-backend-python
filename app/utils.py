@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Dict, Any, Tuple, Optional, Union
 from app.services.postgresql import db
 from app.models.user import User
+import os
+from .services.jwt_service import decode_jwt
 
 # Constants
 EMAIL_REGEX = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
@@ -210,3 +212,31 @@ def error_response(message: str, status_code: int = 400) -> Tuple:
         'success': 0,
         'message': message
     }), status_code
+
+def authenticate_request():
+    """
+    Authenticate the request using the JWT token in the Authorization header.
+
+    Returns:
+        User object if authentication is successful, or a JSON error response if failed.
+    """
+    auth_header = request.headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return error_response('Authorization token is missing or invalid', 401)
+
+    token = auth_header.split(' ')[1]
+    jwt_secret = os.environ.get('JWT_SECRET_KEY', 'default_secret_key')
+
+    try:
+        payload = decode_jwt(token, jwt_secret)
+        user_id = payload.get('userId')
+        if not user_id:
+            return error_response('Invalid token payload', 401)
+
+        user = User.query.get(user_id)
+        if not user:
+            return error_response('User not found', 404)
+
+        return user
+    except Exception as e:
+        return error_response(f'Authentication failed: {str(e)}', 401)
