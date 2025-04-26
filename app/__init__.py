@@ -24,7 +24,6 @@ def create_app():
     app.register_blueprint(main_student_bp)
     app.register_blueprint(main_user_bp)
     app.register_blueprint(main_courses_bp)
-    app.register_blueprint(main_teacher_bp)
     
     # Configure CORS with specific origins if needed in production
     CORS(app, origins=["*"], supports_credentials=True)
