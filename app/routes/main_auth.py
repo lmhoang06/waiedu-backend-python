@@ -4,13 +4,14 @@ import uuid
 from datetime import datetime, timedelta
 from app.services.jwt_service import generate_jwt
 from app.models import User, Subject, UserSubject, UserGender, UserRole
-from app.services.postgresql import db
+from app.services.postgresql import db, ensure_db_connection
 from app import utils
 
 # Create a blueprint for main routes
 main_auth_bp = Blueprint('main', __name__, url_prefix='/main/auth')
 
 @main_auth_bp.route('/login', methods=['POST'])
+@ensure_db_connection
 def login():
     """
     Authenticate a user with email and password
@@ -67,6 +68,7 @@ def login():
         return utils.error_response(f'Error during authentication: {str(e)}', 500)
 
 @main_auth_bp.route('/register', methods=['POST'])
+@ensure_db_connection
 def register():
     """
     Register a new user with email and password
@@ -214,6 +216,7 @@ def register():
         return utils.error_response(f'Error during registration: {str(e)}', 500)
 
 @main_auth_bp.route('/forgot-password', methods=['POST'])
+@ensure_db_connection
 def forgot_password():
     """
     Process forgot password request and generate reset token
@@ -288,6 +291,7 @@ def forgot_password():
         return utils.error_response('Request failed. Please try again later.', 500)
 
 @main_auth_bp.route('/reset-password', methods=['POST'])
+@ensure_db_connection
 def reset_password():
     """
     Reset user password using token

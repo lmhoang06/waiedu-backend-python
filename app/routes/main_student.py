@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from app.models import StudentEnrollment, Course, User
-from app.services.postgresql import db
+from app.services.postgresql import db, ensure_db_connection
 from app.services.jwt_service import decode_jwt
 from app import utils
 import os
@@ -37,6 +37,7 @@ def authenticate_request():
         return utils.error_response(f'Authentication failed: {str(e)}', 401)
 
 @main_student_bp.route('/enrollments', methods=['GET'])
+@ensure_db_connection
 def get_enrollments():
     """
     Retrieve all enrollments for the authenticated student.
@@ -71,6 +72,7 @@ def get_enrollments():
         return utils.error_response(f'Error retrieving enrollments: {str(e)}', 500)
 
 @main_student_bp.route('/courses', methods=['GET'])
+@ensure_db_connection
 def get_available_courses():
     """
     Retrieve all available courses for students.
@@ -104,6 +106,7 @@ def get_available_courses():
         return utils.error_response(f'Error retrieving courses: {str(e)}', 500)
 
 @main_student_bp.route('/enroll', methods=['POST'])
+@ensure_db_connection
 def enroll_in_course():
     """
     Enroll the authenticated student in a course.
