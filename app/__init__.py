@@ -6,7 +6,6 @@ from .routes.main_auth import main_auth_bp
 from .routes.main_student import main_student_bp
 from .routes.main_user import main_user_bp
 from .routes.course import main_courses_bp
-from .routes.main_teacher import main_teacher_bp
 from flask_cors import CORS
 
 def create_app():
