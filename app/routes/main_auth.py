@@ -1,34 +1,16 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify
 import os
-import bcrypt
-import re
 import uuid
 from datetime import datetime, timedelta
 from app.services.jwt_service import generate_jwt
-from app.models.user import User
-from app.models.subject import Subject
-from app.models.user_subject import UserSubject
-from app.models.enums import UserGender, UserRole
+from app.models import User, Subject, UserSubject, UserGender, UserRole
 from app.services.postgresql import db
 from app import utils
 
 # Create a blueprint for main routes
-main_bp = Blueprint('main', __name__, url_prefix='/main')
+main_auth_bp = Blueprint('main', __name__, url_prefix='/main/auth')
 
-@main_bp.route('/', methods=['GET'])
-def index():
-    """
-    Root endpoint for the main blueprint
-    
-    Returns:
-        JSON response indicating the main service is available
-    """
-    return jsonify({
-        'message': 'Main service is running',
-        'status': 'active'
-    })
-
-@main_bp.route('/auth/login', methods=['POST'])
+@main_auth_bp.route('/login', methods=['POST'])
 def login():
     """
     Authenticate a user with email and password
@@ -84,7 +66,7 @@ def login():
     except Exception as e:
         return utils.error_response(f'Error during authentication: {str(e)}', 500)
 
-@main_bp.route('/auth/register', methods=['POST'])
+@main_auth_bp.route('/register', methods=['POST'])
 def register():
     """
     Register a new user with email and password
@@ -231,7 +213,7 @@ def register():
         db.session.rollback()
         return utils.error_response(f'Error during registration: {str(e)}', 500)
 
-@main_bp.route('/auth/forgot-password', methods=['POST'])
+@main_auth_bp.route('/forgot-password', methods=['POST'])
 def forgot_password():
     """
     Process forgot password request and generate reset token
@@ -305,7 +287,7 @@ def forgot_password():
         
         return utils.error_response('Request failed. Please try again later.', 500)
 
-@main_bp.route('/auth/reset-password', methods=['POST'])
+@main_auth_bp.route('/reset-password', methods=['POST'])
 def reset_password():
     """
     Reset user password using token

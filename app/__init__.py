@@ -2,7 +2,8 @@ from flask import Flask
 from .extensions import initialize_firebase, initialize_postgresql
 from .routes.blocks import block_bp
 from .routes.auth import auth_bp
-from .routes.main import main_bp
+from .routes.main_auth import main_auth_bp
+from .routes.main_student import main_student_bp
 from flask_cors import CORS
 
 def create_app():
@@ -17,7 +18,8 @@ def create_app():
     # Register blueprints
     app.register_blueprint(block_bp)
     app.register_blueprint(auth_bp)
-    app.register_blueprint(main_bp)
+    app.register_blueprint(main_auth_bp)
+    app.register_blueprint(main_student_bp)
     
     # Configure CORS with specific origins if needed in production
     CORS(app, origins=["*"], supports_credentials=True)

@@ -46,6 +46,44 @@ class User(db.Model):
         cascade="all, delete-orphan",
         lazy=True
     )
+    
+    # Relationships for parent-child links
+    # Modified to use back_populates to match ParentChildLink model
+    
+    # For parent users - get links to their children
+    children_links = relationship(
+        "ParentChildLink",
+        foreign_keys="ParentChildLink.parent_user_id",
+        back_populates="parent",
+        lazy="dynamic",
+        cascade="all, delete-orphan"
+    )
+    
+    # For child users - get links to their parents
+    parent_links = relationship(
+        "ParentChildLink",
+        foreign_keys="ParentChildLink.child_user_id",
+        back_populates="child",
+        lazy="dynamic",
+        cascade="all, delete-orphan"
+    )
+    
+    # Relationship to course enrollments (for student users)
+    # Changed from backref to back_populates to match StudentEnrollment model
+    course_enrollments = relationship(
+        "StudentEnrollment",
+        foreign_keys="StudentEnrollment.student_user_id",
+        back_populates="student",
+        lazy="dynamic"
+    )
+    
+    # Relationship to taught courses (for teacher users)
+    taught_courses = relationship(
+        "Course",
+        foreign_keys="Course.teacher_user_id",
+        back_populates="teacher",
+        lazy="dynamic"
+    )
 
     def __repr__(self):
         return f'<User id={self.id} email={self.email} role={self.role.value}>'
