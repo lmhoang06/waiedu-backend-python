@@ -341,8 +341,8 @@ def create_course(user):
                     img = img_without_metadata
                     
                     # Calculate dimensions for 16:9 aspect ratio with max resolution 1920x1080
-                    max_width = 1920
-                    max_height = 1080
+                    max_width = 1280
+                    max_height = 720
                     
                     width, height = img.size
                     target_ratio = 16 / 9
