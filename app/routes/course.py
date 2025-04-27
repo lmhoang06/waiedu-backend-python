@@ -3,7 +3,14 @@ from app.models import Course, Subject, User, StudentEnrollment
 from app.services.postgresql import db, ensure_db_connection
 from app import utils
 from app.models.enums import UserRole
+from app.services import r2_storage
 from functools import wraps
+import os
+from io import BytesIO
+from PIL import Image, ExifTags
+import uuid
+import time
+from werkzeug.utils import secure_filename
 
 # Create a blueprint for course routes
 main_courses_bp = Blueprint('main_courses', __name__, url_prefix='/main/courses')
@@ -248,37 +255,59 @@ def create_course(user):
     """
     Create a new course (teacher only)
     
-    Expected request body:
+    Expected request body (JSON or multipart/form-data):
     {
         "title": "Course Title",
         "description": "Course description",
         "price": 100000,
         "subject_id": "math",
         "category": "High School",
-        "image_url": "https://example.com/image.jpg"
+        "image_url": "https://example.com/image.jpg" (optional)
     }
+    
+    If image_url is not provided, you can upload an image file with field name "image"
+    The image can be any common format (JPEG, PNG, GIF, WebP, etc.)
     
     Returns:
         JSON response with the created course data
     """
-    # Get JSON data from request
-    course_data, error = utils.get_request_data()
-    if error:
-        return error
+    # Check content type to handle both form data and JSON
+    if 'multipart/form-data' in request.content_type:
+        # Get form data
+        title = request.form.get('title')
+        description = request.form.get('description', '')
+        price = request.form.get('price', 0)
+        try:
+            if price:
+                price = int(price)
+        except ValueError:
+            return utils.error_response('Price must be a number', 400)
+            
+        currency_code = request.form.get('currency_code', 'VND')
+        subject_id = request.form.get('subject_id')
+        category = request.form.get('category')
+        image_url = request.form.get('image_url')
+        is_published_str = request.form.get('is_published', 'false').lower()
+        is_published = is_published_str in ['true', '1', 'yes']
+    else:
+        # Get JSON data from request
+        course_data, error = utils.get_request_data()
+        if error:
+            return error
+        
+        # Extract fields
+        title = course_data.get('title')
+        description = course_data.get('description', '')
+        price = course_data.get('price', 0)
+        currency_code = course_data.get('currency_code', 'VND')
+        subject_id = course_data.get('subject_id')
+        category = course_data.get('category')
+        image_url = course_data.get('image_url')
+        is_published = course_data.get('is_published', False)
     
-    # Extract and validate required fields
-    title = course_data.get('title')
+    # Validate required fields
     if not title:
         return utils.error_response('Title is required', 400)
-    
-    # Extract optional fields with defaults
-    description = course_data.get('description', '')
-    price = course_data.get('price', 0)
-    currency_code = course_data.get('currency_code', 'VND')
-    subject_id = course_data.get('subject_id')
-    category = course_data.get('category')
-    image_url = course_data.get('image_url')
-    is_published = course_data.get('is_published', False)
     
     # Validate price is non-negative
     if price < 0:
@@ -291,6 +320,65 @@ def create_course(user):
             return utils.error_response(f'Subject with ID {subject_id} not found', 400)
     
     try:
+        # Process image if no image_url is provided
+        if not image_url and 'image' in request.files:
+            image_file = request.files['image']
+            
+            if image_file and image_file.filename:
+                # Process the image
+                try:
+                    # Read the image
+                    img = Image.open(BytesIO(image_file.read()))
+                    
+                    # Convert to RGB mode if the image has an alpha channel or is in a different mode
+                    if img.mode != 'RGB':
+                        img = img.convert('RGB')
+                    
+                    # Remove all metadata - create a new image without the metadata
+                    data = list(img.getdata())
+                    img_without_metadata = Image.new(img.mode, img.size)
+                    img_without_metadata.putdata(data)
+                    img = img_without_metadata
+                    
+                    # Calculate dimensions for 16:9 aspect ratio with max resolution 1920x1080
+                    max_width = 1920
+                    max_height = 1080
+                    
+                    width, height = img.size
+                    target_ratio = 16 / 9
+                    current_ratio = width / height
+                    
+                    if current_ratio > target_ratio:  # Image is wider than 16:9
+                        new_width = min(width, max_width)
+                        new_height = int(new_width / target_ratio)
+                    else:  # Image is taller than 16:9
+                        new_height = min(height, max_height)
+                        new_width = int(new_height * target_ratio)
+                    
+                    # Resize image
+                    img = img.resize((new_width, new_height), Image.LANCZOS)
+                    
+                    # Convert to WebP format
+                    buffer = BytesIO()
+                    img.save(buffer, format='WEBP', quality=85)
+                    buffer.seek(0)
+                    
+                    # Upload to R2 storage using the R2 storage service
+                    success, result, error_detail = r2_storage.upload_image(
+                        buffer,
+                        title,
+                        'image/webp'
+                    )
+                    
+                    if not success:
+                        return utils.error_response(f'Error uploading image: {result}', 400)
+                    
+                    # Use the returned URL as the image_url
+                    image_url = result
+                    
+                except Exception as img_error:
+                    return utils.error_response(f'Error processing image: {str(img_error)}', 400)
+        
         # Create new course
         new_course = Course(
             title=title,
@@ -449,6 +537,31 @@ def delete_course(user, course_id):
         # Check if user is the owner of the course
         if course.teacher_user_id != user.id:
             return utils.error_response('Permission denied. You can only delete your own courses', 403)
+        
+        # Check if image is stored in our R2 storage and delete it if it exists
+        if course.image_url:
+            try:
+                # Get the R2 endpoint URL from environment
+                r2_endpoint = r2_storage.get_r2_endpoint()
+                bucket_name = r2_storage.get_bucket_name()
+                
+                # Check if the image URL points to our R2 storage
+                if r2_endpoint in course.image_url:
+                    # Extract the filename from the URL
+                    # URL format is typically: {r2_endpoint}/{bucket_name}/{filename}
+                    parts = course.image_url.split('/')
+                    if len(parts) >= 2:
+                        filename = parts[-1]  # Get the last part as filename
+                        
+                        # Attempt to delete the file from R2
+                        success, error_msg = r2_storage.delete_file(filename)
+                        
+                        if not success:
+                            # Log error but continue with course deletion
+                            print(f"Warning: Failed to delete image for course {course_id}: {error_msg}")
+            except Exception as e:
+                # Log error but continue with course deletion
+                print(f"Error while attempting to delete course image: {str(e)}")
         
         # Delete the course (will cascade delete enrollments due to relationship setup)
         db.session.delete(course)

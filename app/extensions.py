@@ -7,7 +7,8 @@ import base64
 import logging
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
+import boto3
+from botocore.exceptions import ClientError
 
 dotenv.load_dotenv()
 
@@ -55,4 +56,23 @@ def initialize_postgresql(app):
         
     except Exception as e:
         logging.error(f"Error initializing PostgreSQL database: {str(e)}")
+        raise
+
+def initialize_r2_client(app):
+    """Initializes and returns a boto3 client configured for R2."""
+    try:
+        app.r2_storage = boto3.client(
+            service_name='s3',
+            endpoint_url=os.getenv("R2_ENDPOINT_URL"),
+            aws_access_key_id=os.getenv("R2_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("R2_SECRET_ACCESS_KEY"),
+            region_name='auto' # R2 is globally distributed, 'auto' works well
+        )
+        # Optional: Test connection (e.g., list buckets, though permissions might differ)
+        # r2.list_buckets()
+    except ClientError as e:
+        logging.error(f"Error initializing R2 client: {e}")
+        raise
+    except Exception as e:
+        logging.error(f"Unexpected error initializing R2 client: {e}")
         raise

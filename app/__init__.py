@@ -1,5 +1,5 @@
 from flask import Flask
-from .extensions import initialize_firebase, initialize_postgresql
+from .extensions import initialize_firebase, initialize_postgresql, initialize_r2_client
 from .routes.blocks import block_bp
 from .routes.auth import auth_bp
 from .routes.main_auth import main_auth_bp
@@ -16,6 +16,9 @@ def create_app():
     
     # Initialize PostgreSQL database
     initialize_postgresql(app)
+
+    # Initialize R2 storage client
+    initialize_r2_client(app)
     
     # Register blueprints
     app.register_blueprint(block_bp)
