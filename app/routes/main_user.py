@@ -301,10 +301,38 @@ def update_user(current_user, user_id):
         # Save changes to database
         db.session.commit()
         
-        # Return the updated user data
-        user_data = utils.serialize_user(user)
-        if 'verificationToken' in user_data:
-            del user_data['verificationToken']
+        # Return the updated user data with snake_case keys instead of camelCase
+        # All available fields (excluding password and sensitive fields)
+        user_data = {
+            'id': user.id,
+            'name': user.name,
+            'email': user.email,
+            'phone': user.phone,
+            'birth_date': user.birth_date.isoformat() if user.birth_date else None,
+            'gender': user.gender.value if user.gender else None,
+            'role': user.role.value,
+            'grade': user.grade,
+            'school': user.school,
+            'teaching_subject': user.teaching_subject,
+            'child_grade': user.child_grade,
+            'is_verified': user.is_verified,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'updated_at': user.updated_at.isoformat() if user.updated_at else None
+        }
+        
+        # Include subjects if any
+        if user.user_subjects:
+            subjects_data = []
+            for user_subject in user.user_subjects:
+                subject = user_subject.subject
+                subjects_data.append({
+                    'id': subject.id,
+                    'name': subject.name
+                })
+            
+            if subjects_data:
+                user_data['subjects'] = subjects_data
+                
         return utils.success_response('User updated successfully', {'user': user_data})
         
     except Exception as e:
