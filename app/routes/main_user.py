@@ -80,6 +80,20 @@ def get_users():
                 'updated_at': user.updated_at.isoformat() if user.updated_at else None
             }
             
+            # Get the user's interested subjects
+            if user.user_subjects:
+                # Include full subject details in interested_subjects
+                interested_subjects = []
+                for user_subject in user.user_subjects:
+                    subject = user_subject.subject
+                    interested_subjects.append({
+                        'id': subject.id,
+                        'name': subject.name
+                    })
+                
+                if interested_subjects:
+                    all_fields['interested_subjects'] = interested_subjects
+            
             # If $select is specified, filter the fields
             if select_fields:
                 requested_fields = [field.strip() for field in select_fields.split(',')]
@@ -149,6 +163,20 @@ def get_user(user_id):
             'created_at': user.created_at.isoformat() if user.created_at else None,
             'updated_at': user.updated_at.isoformat() if user.updated_at else None
         }
+        
+        # Get the user's interested subjects
+        if user.user_subjects:
+            # Include full subject details in interested_subjects
+            interested_subjects = []
+            for user_subject in user.user_subjects:
+                subject = user_subject.subject
+                interested_subjects.append({
+                    'id': subject.id,
+                    'name': subject.name
+                })
+            
+            if interested_subjects:
+                all_fields['interested_subjects'] = interested_subjects
         
         # If $select is specified, filter the fields
         if select_fields:
@@ -322,16 +350,17 @@ def update_user(current_user, user_id):
         
         # Include subjects if any
         if user.user_subjects:
-            subjects_data = []
+            # Include full subject details in interested_subjects
+            interested_subjects = []
             for user_subject in user.user_subjects:
                 subject = user_subject.subject
-                subjects_data.append({
+                interested_subjects.append({
                     'id': subject.id,
                     'name': subject.name
                 })
             
-            if subjects_data:
-                user_data['subjects'] = subjects_data
+            if interested_subjects:
+                user_data['interested_subjects'] = interested_subjects
                 
         return utils.success_response('User updated successfully', {'user': user_data})
         

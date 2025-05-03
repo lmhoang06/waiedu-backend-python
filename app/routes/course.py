@@ -360,7 +360,7 @@ def create_course(user):
                     
                     # Convert to WebP format
                     buffer = BytesIO()
-                    img.save(buffer, format='WEBP', quality=85)
+                    img.save(buffer, format='AVIF', quality=80)
                     buffer.seek(0)
                     
                     # Upload to R2 storage using the R2 storage service
