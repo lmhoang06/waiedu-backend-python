@@ -65,6 +65,35 @@ CREATE TABLE IF NOT EXISTS user_subjects (
     CONSTRAINT user_subject_unique UNIQUE (user_id, subject_id) -- PostgreSQL UNIQUE constraint syntax
 );
 
+-- Trigger function to update the updated_at column for user
+CREATE OR REPLACE FUNCTION update_updated_at_column_for_user_from_user_subject()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Handle INSERT/UPDATE
+    IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+        UPDATE users
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = NEW.user_id;
+    -- Handle DELETE
+    ELSIF TG_OP = 'DELETE' THEN
+        UPDATE users
+        SET updated_at = CURRENT_TIMESTAMP
+        WHERE id = OLD.user_id;
+    END IF;
+
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger for user_subjects table to update the updated_at column in users
+DROP TRIGGER IF EXISTS trg_user_subjects_update ON user_subjects;
+
+CREATE TRIGGER trg_user_subjects_update
+AFTER INSERT OR UPDATE OR DELETE ON user_subjects
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column_for_user_from_user_subject();
+
+
 -- Insert default subjects using PostgreSQL's ON CONFLICT clause for UPSERT
 INSERT INTO subjects (id, name) VALUES
 ('physics', 'Vật Lý'),
