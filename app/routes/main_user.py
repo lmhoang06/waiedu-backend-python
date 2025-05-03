@@ -209,6 +209,19 @@ def update_user(current_user, user_id):
         if 'phone' in update_data:
             user.phone = update_data['phone']
             
+        if 'birth_date' in update_data:
+            birth_date = update_data['birth_date']
+            # Handle both conversion from string date format and clearing the date
+            if birth_date:
+                try:
+                    from datetime import datetime
+                    # Try to parse the date string in ISO format (YYYY-MM-DD)
+                    user.birth_date = datetime.fromisoformat(birth_date).date()
+                except ValueError:
+                    return utils.error_response('Invalid birth date format. Use YYYY-MM-DD format.', 400)
+            else:
+                user.birth_date = None
+                
         if 'grade' in update_data:
             user.grade = update_data['grade']
             
@@ -232,7 +245,7 @@ def update_user(current_user, user_id):
                 user.gender = None
         
         # Handle email updates - only if current user is admin or it's verified first
-        if 'email' in update_data and (current_user.role == UserRole.admin or user.is_verified):
+        if 'email' in update_data and user.is_verified:
             email = update_data['email']
             
             # Validate email
